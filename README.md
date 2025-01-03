@@ -23,6 +23,19 @@ Then, clone the repo and in the cloned repo run:
 cargo build
 ```
 
+To run the application through cargo, you need to install `epflash`:
+
+```{bash}
+cargo install espflash
+```
+
+and then with an ESP32 device connected via USB you can flash and run the device with:
+
+
+```{bash}
+cargo run
+```
+
 Resources I'm using:
 
 * [ESP-IDF Programming Guide](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/index.html), the basic documentation for ESP-IDF platform, which packages useful libraries with FreeRTOS, allowing you to use `std` Rust in an embedded environment.
