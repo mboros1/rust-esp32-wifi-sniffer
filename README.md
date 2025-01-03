@@ -14,6 +14,9 @@ cargo install espup
  espup install
 ```
 
+This project uses the `std` Rust environment on the ESP32 microprocessors, which has different dependencies based on your OS, directions can be found here, https://docs.esp-rs.org/book/installation/std-requirements.html
+
+
 Then, clone the repo and in the cloned repo run:
 
 ```{bash}
