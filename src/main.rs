@@ -1,3 +1,8 @@
+mod packet;
+
+use packet::Packet;
+use packet::PacketError;
+
 use std::os::raw::c_void;
 
 use esp_idf_svc::{
@@ -27,6 +32,18 @@ extern "C" fn wifi_sniffer_packet_handler(
     unsafe {
         let packet = &*(buf as *const wifi_promiscuous_pkt_t);
         let ctrl = &packet.rx_ctrl;
+
+        let raw_pkt =
+            std::slice::from_raw_parts(packet.payload.as_ptr(), packet.rx_ctrl.sig_len() as usize);
+
+        match Packet::new(raw_pkt) {
+            Ok(decoded_packet) => {
+                println!("Decoded Packet: {:?}", decoded_packet);
+            }
+            Err(e) => {
+                println!("Error decoding packet: {:?}", e);
+            }
+        }
 
         match packet_type {
             WIFI_PKT_MGMT => {
