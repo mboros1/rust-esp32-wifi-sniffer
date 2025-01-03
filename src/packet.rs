@@ -1,14 +1,13 @@
 use std::collections::HashSet;
 use std::fmt::{self, Formatter};
-use std::io::Cursor;
+use std::io::{Cursor, Read};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// Error types for Packet parsing
-#[derive(Debug)]
-pub enum PacketError {
-    UnknownPacket(String),
-    SSIDDecodeError(String),
-    // Add other error variants as needed
-}
+use base64::engine::general_purpose;
+use base64::Engine;
+use byteorder::{ByteOrder, LittleEndian as LE, ReadBytesExt};
+
+// Error decoding packet: UnknownRadioTapLength(0)
 
 /// All the possible packet types for 802.11.
 #[allow(non_camel_case_types)]
@@ -95,6 +94,48 @@ pub enum Packet_Name {
     /// Unknown Packet Type and Subtype.
     #[default]
     Unknown,
+}
+
+/// Possible errors that could occur while decoding a packet.
+#[derive(Debug, Clone)]
+pub enum PacketError {
+    /// RadioTap Header length was different than normal.
+    /// Will eventually get to the length.
+    UnknownRadioTapLength(usize),
+    /// Error while decoding one the RadioTap Header.
+    RadioTapError,
+    /// Error while trying to decode the Frame Control.
+    FrameControlError,
+    /// Error while trying to write the packet to a pcap file.
+    PcapWriterError(String),
+    /// Error while trying to Base64 decoding the SSID.
+    SSIDDecodeError(String),
+    /// Packet type and subtype are not known.
+    UnknownPacket(String),
+    /// Unknown Error.
+    Unknown(String),
+}
+
+impl fmt::Display for PacketError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            PacketError::RadioTapError => {
+                write!(f, "Error has occurred while decoding the RadioTap Header.")
+            }
+            PacketError::UnknownRadioTapLength(e) => {
+                write!(f, "Unknown RadioTap Header Length: {e}")
+            }
+            PacketError::FrameControlError => {
+                write!(f, "Error has occurred while decoding the Frame Control.")
+            }
+            PacketError::PcapWriterError(e) => {
+                write!(f, "Error occurred while writing the pcap.\n{e}")
+            }
+            PacketError::SSIDDecodeError(e) => write!(f, "Couldn't Base64 decode the SSID: {e}."),
+            PacketError::UnknownPacket(e) => write!(f, "Packet is Unknown.\n{e}"),
+            PacketError::Unknown(e) => write!(f, "Unknown error has occurred.\n{e}"),
+        }
+    }
 }
 
 impl fmt::Display for Packet_Name {
@@ -198,6 +239,248 @@ impl Packet_Name {
             (3, 0) => Packet_Name::DMGBeacon,
             _ => Packet_Name::Unknown,
         }
+    }
+}
+
+// Different Flag that could be present in the RadioTap Header.
+#[derive(Debug)]
+enum PresentFlags {
+    TSFT,
+    Flags,
+    Rate,
+    Channel,
+    FHSS,
+    AntennaSignal,
+    AntennaNoise,
+    LockQuality,
+    TxAttenuation,
+    TxAttenuationDb,
+    TxPower,
+    Antenna,
+    AntennaSignalDb,
+    AntennaNoiseDb,
+    RxFlags,
+    TxFlags,
+    RTSRetries,
+    DataRetries,
+    XChannel,
+    MCS,
+    AMPDUStatus,
+    VHT,
+    Timestamp,
+}
+
+impl PresentFlags {
+    fn new(bit: i32) -> Option<PresentFlags> {
+        match bit {
+            0 => Some(PresentFlags::TSFT),
+            1 => Some(PresentFlags::Flags),
+            2 => Some(PresentFlags::Rate),
+            3 => Some(PresentFlags::Channel),
+            4 => Some(PresentFlags::FHSS),
+            5 => Some(PresentFlags::AntennaSignal),
+            6 => Some(PresentFlags::AntennaNoise),
+            7 => Some(PresentFlags::LockQuality),
+            8 => Some(PresentFlags::TxAttenuation),
+            9 => Some(PresentFlags::TxAttenuationDb),
+            10 => Some(PresentFlags::TxPower),
+            11 => Some(PresentFlags::Antenna),
+            12 => Some(PresentFlags::AntennaSignalDb),
+            13 => Some(PresentFlags::AntennaNoiseDb),
+            14 => Some(PresentFlags::RxFlags),
+            15 => Some(PresentFlags::TxFlags),
+            16 => Some(PresentFlags::RTSRetries),
+            17 => Some(PresentFlags::DataRetries),
+            18 => Some(PresentFlags::XChannel),
+            19 => Some(PresentFlags::MCS),
+            20 => Some(PresentFlags::AMPDUStatus),
+            21 => Some(PresentFlags::VHT),
+            22 => Some(PresentFlags::Timestamp),
+            _ => None,
+        }
+    }
+}
+
+// Take the frequency and turns it to a channel.
+fn get_channel(freq: u16) -> u8 {
+    match freq {
+        2412 => 1,
+        2417 => 2,
+        2422 => 3,
+        2427 => 4,
+        2432 => 5,
+        2437 => 6,
+        2442 => 7,
+        2447 => 8,
+        2452 => 9,
+        2457 => 10,
+        2462 => 11,
+        2467 => 12,
+        2472 => 13,
+        2484 => 14,
+        5180 => 36,
+        5200 => 40,
+        5220 => 44,
+        5240 => 48,
+        5260 => 52,
+        5280 => 56,
+        5300 => 60,
+        5320 => 64,
+        5500 => 100,
+        5520 => 104,
+        5540 => 108,
+        5560 => 112,
+        5600 => 120,
+        5620 => 124,
+        5640 => 128,
+        5660 => 132,
+        5680 => 136,
+        5700 => 140,
+        5720 => 144,
+        5745 => 149,
+        5765 => 153,
+        5785 => 157,
+        5805 => 161,
+        5825 => 165,
+        _ => 0,
+    }
+}
+
+// Gets the present flags for a RadioTap Header with a length of 18.
+fn get_present(pf: u32) -> Vec<PresentFlags> {
+    let mut present_flags: Vec<PresentFlags> = vec![];
+    for bit in 0..29 {
+        if pf & (1 << bit) != 0 {
+            if let Some(x) = PresentFlags::new(bit) {
+                present_flags.push(x);
+            }
+        }
+    }
+    present_flags
+}
+
+// Decoding a RadioTap Header with a length of 18.
+fn length_18(curs: &mut Cursor<&[u8]>) -> Result<(i8, u8), PacketError> {
+    let mut freq: u16 = 0;
+    let mut signal: i8 = 0;
+    let mut _present_flag: Vec<PresentFlags> = get_present(curs.read_u32::<LE>().unwrap());
+
+    for i in _present_flag.into_iter() {
+        match i {
+            PresentFlags::TSFT => curs.set_position(curs.position() + 8),
+            PresentFlags::Flags => curs.set_position(curs.position() + 1),
+            PresentFlags::Rate => curs.set_position(curs.position() + 1),
+            PresentFlags::Channel => {
+                freq = curs
+                    .read_u16::<LE>()
+                    .map_err(|_| PacketError::RadioTapError)?;
+                curs.set_position(curs.position() + 2);
+            }
+            PresentFlags::FHSS => curs.set_position(curs.position() + 2),
+            PresentFlags::AntennaSignal => {
+                signal = curs.read_i8().map_err(|_| PacketError::RadioTapError)?;
+                break;
+            }
+            _ => (),
+        }
+    }
+
+    curs.set_position(18);
+    Ok((signal, get_channel(freq)))
+}
+
+// Decoding a RadioTap Header with a length of 21.
+fn length_21(curs: &mut Cursor<&[u8]>) -> Result<(i8, u8), PacketError> {
+    curs.set_position(curs.position() + 6);
+
+    let freq: u16 = curs
+        .read_u16::<LE>()
+        .map_err(|_| PacketError::RadioTapError)?;
+
+    curs.set_position(curs.position() + 2);
+
+    let signal: i8 = curs.read_i8().map_err(|_| PacketError::RadioTapError)?;
+
+    curs.set_position(21);
+    Ok((signal, get_channel(freq)))
+}
+
+// Decoding a RadioTap Header with a length of 24.
+fn length_24(curs: &mut Cursor<&[u8]>) -> Result<(i8, u8), PacketError> {
+    curs.set_position(curs.position() + 10);
+
+    let freq: u16 = curs
+        .read_u16::<LE>()
+        .map_err(|_| PacketError::RadioTapError)?;
+
+    curs.set_position(curs.position() + 2);
+
+    let signal: i8 = curs.read_i8().map_err(|_| PacketError::RadioTapError)?;
+
+    curs.set_position(24);
+    Ok((signal, get_channel(freq)))
+}
+
+// Decoding a RadioTap Header with a length of 27.
+fn length_27(curs: &mut Cursor<&[u8]>) -> Result<(i8, u8), PacketError> {
+    curs.set_position(curs.position() + 9);
+
+    let freq: u16 = curs
+        .read_u16::<LE>()
+        .map_err(|_| PacketError::RadioTapError)?;
+
+    curs.set_position(curs.position() + 2);
+
+    let signal: i8 = curs.read_i8().map_err(|_| PacketError::RadioTapError)?;
+
+    curs.set_position(27);
+    Ok((signal, get_channel(freq)))
+}
+
+// Decoding a RadioTap Header with a length of 38.
+fn length_38(curs: &mut Cursor<&[u8]>) -> Result<(i8, u8), PacketError> {
+    curs.set_position(curs.position() + 9);
+
+    let freq: u16 = curs
+        .read_u16::<LE>()
+        .map_err(|_| PacketError::RadioTapError)?;
+
+    curs.set_position(curs.position() + 2);
+
+    let signal: i8 = curs.read_i8().map_err(|_| PacketError::RadioTapError)?;
+
+    curs.set_position(38);
+    Ok((signal, get_channel(freq)))
+}
+
+// Decoding a RadioTap Header with a length of 46.
+fn length_46(curs: &mut Cursor<&[u8]>) -> Result<(i8, u8), PacketError> {
+    curs.set_position(curs.position() + 9);
+
+    let freq: u16 = curs
+        .read_u16::<LE>()
+        .map_err(|_| PacketError::RadioTapError)?;
+
+    curs.set_position(curs.position() + 2);
+
+    let signal: i8 = curs.read_i8().map_err(|_| PacketError::RadioTapError)?;
+
+    curs.set_position(46);
+    Ok((signal, get_channel(freq)))
+}
+
+/// Parses the RadioTap Header. Returns a Result of either a tuple of (signal, channel) or a PacketError.
+pub fn parse_rtap(curs: &mut Cursor<&[u8]>) -> Result<(i8, u8), PacketError> {
+    curs.set_position(curs.position() + 2);
+    let length: usize = curs.read_u16::<LE>().unwrap() as usize;
+    match length {
+        18 => length_18(curs),
+        21 => length_21(curs),
+        24 => length_24(curs),
+        27 => length_27(curs),
+        38 => length_38(curs),
+        46 => length_46(curs),
+        _ => Err(PacketError::UnknownRadioTapLength(length)),
     }
 }
 
@@ -346,4 +629,175 @@ impl Packet {
             self.addr4.clone(),
         ])
     }
+}
+
+// Gets the System Time and turns it into Seconds and Microseconds.
+// Used for writing the packet to the pcap file.
+fn create_time() -> (u64, u32) {
+    let sys_time: SystemTime = SystemTime::now();
+
+    let duration: Duration = match sys_time.duration_since(UNIX_EPOCH) {
+        Ok(t) => t,
+        Err(_) => return (0, 0),
+    };
+
+    let sec: u64 = duration.as_secs();
+    let usec: u32 = duration.subsec_micros();
+    (sec, usec)
+}
+
+fn none_address() -> String {
+    String::from("None")
+}
+
+fn unknown_ssid() -> String {
+    String::from("***U_n_k_n_o_w_n***")
+}
+
+fn read_mac(curs: &mut Cursor<&[u8]>) -> String {
+    curs.read_u48::<LE>()
+        .map_or_else(|_| none_address(), mac_address)
+}
+
+// Turns the u64 in to a readable mac.
+fn mac_address(x: u64) -> String {
+    format!(
+        "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+        x as u8,
+        (x >> 8) as u8,
+        (x >> 16) as u8,
+        (x >> 24) as u8,
+        (x >> 32) as u8,
+        (x >> 40) as u8
+    )
+}
+
+// Checks to see if there are any None Printable Characters in the SSID
+fn check_for_printable(ssid: &str) -> bool {
+    for char in ssid.chars() {
+        if !char.is_ascii() {
+            return false;
+        }
+    }
+    true
+}
+
+// Loops through the Information Elements till the ssid if found.
+fn find_ssid(curs: &mut Cursor<&[u8]>) -> String {
+    let mut ssid: String = unknown_ssid();
+
+    loop {
+        let element_id: u8 = match curs.read_u8() {
+            Ok(val) => val,
+            Err(_) => break,
+        };
+
+        let element_len: u8 = match curs.read_u8() {
+            Ok(val) => val,
+            Err(_) => break,
+        };
+
+        if element_id != 0 {
+            curs.set_position(curs.position() + element_len as u64);
+            continue;
+        }
+
+        ssid = get_ssid(element_len, curs);
+        break;
+    }
+
+    ssid
+}
+
+// Parses the SSID Information Element to get the SSID.
+fn get_ssid(length: u8, curs: &mut Cursor<&[u8]>) -> String {
+    match length {
+        0 => unknown_ssid(),
+        _ => {
+            // Creating a Vector of 0 the length of size of the ssid.
+            let mut ssid_bytes: Vec<u8> = vec![0; length as usize];
+
+            // Extracting the ssid and writing it to the ssid_bytes vec.
+            match curs.read_exact(&mut ssid_bytes[0..length as usize]) {
+                Ok(_) => (),
+                Err(_) => return unknown_ssid(),
+            };
+
+            let mut ssid: String =
+                String::from_utf8_lossy(&ssid_bytes[0..length as usize]).to_string();
+
+            // Checking to see if the ssid has printable characters.
+            // If not then base64 encode the ssid and add b64- to the front.
+            if !check_for_printable(&ssid) {
+                ssid = format!("b64-{}", general_purpose::STANDARD.encode(ssid))
+            }
+
+            if is_ssid_all_null(&ssid) {
+                ssid = unknown_ssid();
+            }
+
+            ssid
+        }
+    }
+}
+
+// Checks all the characters of the ssid to see if they are all null characters.
+fn is_ssid_all_null(ssid: &str) -> bool {
+    for byte in ssid.bytes() {
+        if byte != 0 {
+            return false;
+        }
+    }
+    true
+}
+
+// Decodes the Frame Control from the packet. Returns the packet type, packet subtype, toDS and fromDS.
+fn frame_control(
+    curs: &mut Cursor<&[u8]>,
+) -> Result<(u16, u16, u16, u16, Packet_Name), PacketError> {
+    let fc = curs
+        .read_u16::<LE>()
+        .map_err(|_| PacketError::RadioTapError)?;
+
+    let pkt_type: u16 = (fc & 0b0000_0000_0000_1100) >> 2;
+    let pkt_subtype: u16 = (fc & 0b0000_0000_1111_0000) >> 4;
+    let to_ds: u16 = (fc & 0b0000_0001_0000_0000) >> 8;
+    let frm_ds: u16 = (fc & 0b0000_0010_0000_0000) >> 9;
+    Ok((
+        pkt_type,
+        pkt_subtype,
+        to_ds,
+        frm_ds,
+        Packet_Name::new(pkt_type, pkt_subtype),
+    ))
+}
+
+fn get_macs_and_ssid(
+    curs: &mut Cursor<&[u8]>,
+    jump: u64,
+) -> (String, String, String, String, String) {
+    let (addr1, addr2, addr3, addr4, _) = get_macs(curs, 3);
+    // Getting the ssid Information and ssid.
+    curs.set_position(curs.position() + jump);
+    let ssid: String = find_ssid(curs);
+    (addr1, addr2, addr3, addr4, ssid)
+}
+
+fn get_macs(curs: &mut Cursor<&[u8]>, how_many: u8) -> (String, String, String, String, String) {
+    curs.set_position(curs.position() + 2);
+    let addr1: String = read_mac(curs);
+    let addr2: String = read_mac(curs);
+    let mut addr3: String = none_address();
+    let mut addr4: String = none_address();
+    match how_many {
+        3 => addr3 = read_mac(curs),
+        4 => {
+            addr3 = read_mac(curs);
+            curs.set_position(curs.position() + 2);
+            addr4 = read_mac(curs);
+        }
+        _ => (),
+    }
+
+    (addr1, addr2, addr3, addr4, none_address())
 }
