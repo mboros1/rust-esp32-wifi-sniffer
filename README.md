@@ -2,13 +2,23 @@
 
 Making this project as a test bed for developing microcontrollers with Rust, as the Espressif ESP32 as the platform.
 
-To build, first run:
+To build, first install the ESP toolchain manager:
 
 ```{bash}
 cargo install espup
 ```
 
-to install the ESP toolchain manager, then run `espup install` to install the necessary toolchains and dependencies. Then, clone the repo and run `cargo build` in the cloned directory.
+ Then to install the necessary toolchains and dependencies.  
+ 
+ ```{bash}
+ espup install
+```
+
+Then, clone the repo and in the cloned repo run:
+
+```{bash}
+cargo build
+```
 
 Resources I'm using:
 
