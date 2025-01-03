@@ -4,7 +4,9 @@ Making this project as a test bed for developing microcontrollers with Rust, as 
 
 To build, first run:
 
-```cargo install espup```
+```{bash}
+cargo install espup
+```
 
 to install the ESP toolchain manager, then run `espup install` to install the necessary toolchains and dependencies. Then, clone the repo and run `cargo build` in the cloned directory.
 
