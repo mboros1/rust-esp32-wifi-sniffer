@@ -44,4 +44,4 @@ Resources I'm using:
 * [Crate esp_idf_svc](https://docs.esp-rs.org/esp-idf-svc/esp_idf_svc/index.html), documentation for the crate that allows you to program using the ESP-IDF SDK with Rust. Works quite well, sometimes have to access the lower level unsafe C bindings, but still better then programming in C IMO
 * [The Rust on ESP Book](https://docs.esp-rs.org/book/), a useful guide to get started
 * [Espressif IoT Development Framework](https://github.com/espressif/esp-idf), the C SDK that the `esp_idf_svc` crate uses under the hood. Sometimes useful when you want to build a C/C++ program to compare against the Rust version, at least so far for me because all my application code is written in C++ atm
-
+*[Embedded Rust (no_std) on Espressif](https://docs.esp-rs.org/book/writing-your-own-application/nostd.html), trying out the newest dev kit, ESP32C3, has RISC-V architecture and compatible with `probe.rs` but only supports `no_std`
