@@ -1,5 +1,5 @@
 [package]
-name = "rust-esp-test"
+name = "rust-esp32c3-wifi-sniffer"
 version = "0.1.0"
 authors = ["Martin Boros <mboros04@gmail.com>"]
 edition = "2021"
@@ -7,7 +7,7 @@ resolver = "2"
 rust-version = "1.77"
 
 [[bin]]
-name = "rust-esp-test"
+name = "rust-esp32c3-wifi-sniffer"
 harness = false # do not use the built in cargo test harness -> resolve rust-analyzer errors
 
 [profile.release]
