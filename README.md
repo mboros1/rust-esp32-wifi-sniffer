@@ -1,3 +1,5 @@
+TODO: rollback changes to esp32c3 chip; I just made another repo for the different chipset. I may just focus on the latest generation chip and deprecate this repo
+
 ## An ESP32 based WiFi Sniffer, Written in Rust
 
 
