@@ -1,5 +1,5 @@
 [build]
-target = "xtensa-esp32-espidf"
+target = "riscv32imc-unknown-none-elf"
 
 [target.xtensa-esp32-espidf]
 linker = "ldproxy"

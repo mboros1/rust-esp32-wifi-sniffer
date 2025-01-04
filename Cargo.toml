@@ -27,6 +27,7 @@ log = "0.4"
 esp-idf-svc = { version = "0.50", features = ["critical-section", "embassy-time-driver", "embassy-sync"] }
 byteorder = "1.4"
 base64 = "0.21"
+alloc = { version = "1.0.0", features = ["alloc"] }
 
 [build-dependencies]
 embuild = "0.33"
