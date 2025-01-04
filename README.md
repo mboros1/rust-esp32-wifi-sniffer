@@ -2,6 +2,7 @@
 
 
 ### TODO: broke the build trying to use the newer esp32c3 chip. going this way because esp32c3 supports probe.rs debugging which is really nice; read the espressif rust book about building with no_std, I think we just need to define an allocator
+### TODO: the packet parser wasn't working; getting this error: // Error decoding packet: UnknownRadioTapLength(0)
 
 Making this project as a test bed for developing microcontrollers with Rust, as the Espressif ESP32 as the platform.
 
