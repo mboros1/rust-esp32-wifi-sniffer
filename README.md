@@ -1,4 +1,4 @@
-TODO: rollback changes to esp32c3 chip; I just made another repo for the different chipset. I may just focus on the latest generation chip and deprecate this repo
+TODO: check out this video https://youtu.be/A59frxEvs7M?si=G4HF9kYLz8d-_ra6&t=51 to attach a usb over uart debug probe
 
 ## An ESP32 based WiFi Sniffer, Written in Rust
 
